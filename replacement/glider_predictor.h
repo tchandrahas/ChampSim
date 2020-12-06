@@ -24,10 +24,7 @@ class pchr{
   bool probe(uint64_t checking_PC){
     // if the checking_PC is present return true
     for(int i=0;i<NUM_PC_PCHR;i++){
-      if(pc_cache.at(i).PC == checking_PC && pc_cache.at(i).valid == true){
-        #ifdef DEBUG_PRINT
-        cout << "Probe for PC: " << hex << checking_PC << " is successfull at postion: " << i << endl;
-        #endif
+      if((pc_cache.at(i).PC == checking_PC) && (pc_cache.at(i).valid == true)){
         return true;
       }
     }
@@ -39,11 +36,10 @@ class pchr{
     bool return_value = false;
     // Access the access_PC, which means that we have to update the LRU counter here
     for(int i=0;i<NUM_PC_PCHR;i++){
-      if(pc_cache.at(i).PC == access_PC && pc_cache.at(i).valid == true){
+      if((pc_cache.at(i).PC == access_PC) && (pc_cache.at(i).valid == true)){
         // Should make the LRU value 4, because we accessed it 
         pc_cache.at(i).LRU_count = NUM_PC_PCHR-1;
         return_value = true;
-
       }
       else if(pc_cache.at(i).valid == true) {
         // decrement the LRU value, with a floor of zero
@@ -52,7 +48,7 @@ class pchr{
     }
     #ifdef DEBUG_PRINT
     for(int i=0;i<NUM_PC_PCHR;i++){
-      cout << "LRU count at position "<< i << " is " <<  pc_cache.at(i).LRU_count << endl;
+      printf("LRU count at position %d is %d\n",i, pc_cache.at(i).LRU_count);
     }
     #endif
     return return_value;
@@ -66,14 +62,14 @@ class pchr{
         // found a invalid element, hence we can exit from here
         insert_position = i;
         #ifdef DEBUG_PRINT
-        cout << "Inserting the PC: " << hex << inserting_PC << " at the position: " << i << endl;
+        printf("Inserting the PC: %lx, at the position: %d\n", inserting_PC, i);
         #endif
         break;
       }
       else if(pc_cache.at(i).LRU_count == 0){
         insert_position = i;
         #ifdef DEBUG_PRINT
-        cout << "Inserting the PC: " << hex << inserting_PC << " at the position: " << i << endl;
+        printf("Inserting the PC: %lx at the position: %d ", inserting_PC, i );
         #endif
         break;
       }
@@ -95,7 +91,7 @@ class pchr{
     }
     #ifdef DEBUG_PRINT
     for(int i=0;i<NUM_PC_PCHR;i++){
-      cout << "LRU count at position "<< i << " is " <<  pc_cache.at(i).LRU_count << endl;
+      printf("LRU count at position %d is %d\n",i,pc_cache.at(i).LRU_count);
     }
     #endif
     return return_value;
@@ -159,7 +155,7 @@ class glider_predictor{
     // first get the hash of the access_PC to index into ISVM table
     unsigned int isvm_table_hash = ISVM_table_hash(access_PC);
     #ifdef DEBUG_PRINT
-      cout << "The hash for accessing PC into ISVM table is  " << isvm_table_hash << endl;
+      printf("The hash for accessing PC into ISVM table is  %d\n", isvm_table_hash);
     #endif
     // get the iterator by hashing into the map function
     map<unsigned int,isvm_entry>::iterator isvm_iterator = isvm_table.find(isvm_table_hash);
@@ -182,7 +178,7 @@ class glider_predictor{
         // use the PC to generate the hash into the isvm
         PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
         #ifdef DEBUG_PRINT
-        cout << "A PC in PCHR resulted in hash of " << PCHR_PC_hash << endl;
+        printf("A PC in PCHR resulted in hash of %d\n",PCHR_PC_hash);
         #endif
         // use the hash to get the weight
         map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
@@ -193,7 +189,7 @@ class glider_predictor{
       }
     }
     #ifdef DEBUG_PRINT 
-    cout << "The sum of weights obtained by the PC's from PCHR hashing into the ISVM is "<< weights_sum << endl; 
+    printf("The sum of weights obtained by the PC's from PCHR hashing into the ISVM is %d\n",weights_sum);
     #endif
     // If the program has reached this point this means that we have already collected all the weights from PC's in PCHR
     if(weights_sum > weights_sum_threshold){
@@ -207,7 +203,7 @@ class glider_predictor{
     // To train the predictor, first we need to hash in the access PC to get a ISVM
     unsigned int isvm_table_hash = ISVM_table_hash(access_PC);
     #ifdef DEBUG_PRINT
-      cout << "The hash for accessing PC into ISVM table is  " << isvm_table_hash << endl;
+    printf("The hash for accessing PC into ISVM table is %d\n", isvm_table_hash );
     #endif
     // get the iterator by hashing into the map function
     map<unsigned int,isvm_entry>::iterator isvm_iterator = isvm_table.find(isvm_table_hash);
@@ -231,7 +227,7 @@ class glider_predictor{
       // use the PC to generate the hash into the isvm
       PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
       #ifdef DEBUG_PRINT
-      cout << "A PC in PCHR resulted in hash of " << PCHR_PC_hash << endl;
+      printf("A PC in PCHR resulted in hash of %d\n",PCHR_PC_hash);
       #endif
       // use the hash to get the weight
       map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
@@ -240,13 +236,13 @@ class glider_predictor{
       // Accumulate the weights in weights_sum
       weights_sum += weight_iterator->second;
       #ifdef DEBUG_PRINT
-      cout << "The weight obtained is " << weight_iterator->second << endl;
+      printf("The weight obtained is %d\n", weight_iterator->second);
       #endif
     }  
     // Increment the weights if their threshold doesnt exceed 100
     if(weights_sum < 100){
       #ifdef DEBUG_PRINT
-      cout << "Incrementing the weights associated with ISVM of " << hex << access_PC << endl; 
+      printf("Incrementing the weights associated with ISVM of %lx\n", access_PC); 
       #endif
       for(int i=0;i<NUM_PC_PCHR;i++){
         // get the PC from PCHR
@@ -254,7 +250,7 @@ class glider_predictor{
         // use the PC to generate the hash into the isvm
         PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
         #ifdef DEBUG_PRINT
-        cout << "A PC in PCHR resulted in hash of " << PCHR_PC_hash << endl;
+        printf("A PC in PCHR resulted in hash of %d\n", PCHR_PC_hash);
         #endif
         // use the hash to get the weight
         map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
@@ -266,7 +262,7 @@ class glider_predictor{
     }
     else{
       #ifdef DEBUG_PRINT
-      cout << "The sum of weights is more than training threshold, so we have not increment the weights" << endl;
+      printf("The sum of weights is more than training threshold, so we have not increment the weights\n");
       #endif
     }
     return true; 
@@ -275,7 +271,7 @@ class glider_predictor{
     //To train the predictor, first we need to hash in the access PC to get a ISVM
     unsigned int isvm_table_hash = ISVM_table_hash(access_PC);
     #ifdef DEBUG_PRINT
-      cout << "The hash for accessing PC into ISVM table is  " << isvm_table_hash << endl;
+      printf("The hash for accessing PC into ISVM table is %d\n", isvm_table_hash);
     #endif
     // get the iterator by hashing into the map function
     map<unsigned int,isvm_entry>::iterator isvm_iterator = isvm_table.find(isvm_table_hash);
@@ -299,7 +295,7 @@ class glider_predictor{
       // use the PC to generate the hash into the isvm
       PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
       #ifdef DEBUG_PRINT
-      cout << "A PC in PCHR resulted in hash of " << PCHR_PC_hash << endl;
+      printf("A PC in PCHR resulted in hash of %d\n", PCHR_PC_hash);
       #endif
       // use the hash to get the weight
       map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
@@ -308,7 +304,7 @@ class glider_predictor{
       // Decrement the weights with a basement of 0
       weight_iterator->second = (weight_iterator->second > 0)?(weight_iterator->second-1):0;
       #ifdef DEBUG_PRINT
-      cout << "The weight obtained is " << weight_iterator->second << endl;
+      printf("The weight obtained is %d\n", weight_iterator->second);
       #endif
     }
     return true; 
@@ -317,10 +313,16 @@ class glider_predictor{
     // This function is to complete the access of a access PC, after getting the prediction and traning
     // Probe if the PCHR already contains the access PC
     if(PCHR->probe(access_PC) == true){
-      assert(complete_access(access_PC));
+      #ifdef DEBUG_PRINT
+      printf("PCHR already contains the PC: %lx, hence we have to just update the LRU counters\n");
+      #endif
+      assert(PCHR->complete_access(access_PC));
     }
     else{
       // this means that access_PC is not in PCHR, we have to insert it 
+      #ifdef DEBUG_PRINT
+      printf("PCHR doesnot contain the PC: %lx, hence we have to insert into PCHR\n");
+      #endif
       assert(PCHR->insert(access_PC));
     }
     return true;

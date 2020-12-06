@@ -102,13 +102,14 @@ class sampler_cache{
         else if(addr_history[sampler_set].find(sampler_tag) == addr_history[sampler_set].end()){
             return false;
         }
+        return false;
     }
     // Function to add element into SamplerCache
     bool add_element(uint32_t sampler_set, uint64_t sampler_tag,uint64_t curr_quanta){
         // First check if the number of ways are full
         if(addr_history[sampler_set].size() == SAMPLER_WAYS){
             #ifdef DEBUG_PRINT
-            cout << "sampler_set: " << sampler_set << " was found to be full, will be replacing one" << endl;
+            printf("sampler_set: %d was found to be full, will be replacing one", sampler_set);
             #endif
             replace_addr_history_element(sampler_set);
         }
@@ -255,6 +256,7 @@ class OPTgen{
         assert(SamplerCache->add_element( sampler_set,  sampler_tag, curr_quanta));
         perset_optgen[set].add_access(curr_quanta);
         SamplerCache->update_addr_history_lru(sampler_set,SAMPLER_WAYS-1);
+        return true;
     }
     // Function that takes care of some book-keeping that neeeds to be done after obtaining the prediction
     bool CompleteOptgen(uint64_t PC,uint64_t paddr,uint32_t set){
@@ -264,6 +266,7 @@ class OPTgen{
         perset_mytimer[set] = (perset_mytimer[set]+1) % TIMER_SIZE;
         //addr_history[sampler_set][sampler_tag].update(perset_mytimer[set], PC, new_prediction);
         //addr_history[sampler_set][sampler_tag].lru = 0;
+        return true;
     }
     
 };
