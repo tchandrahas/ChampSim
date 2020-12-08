@@ -8,7 +8,7 @@ using namespace std;
 #define NUM_PC_PCHR 5
 #define NUM_WEIGHTS 16
 #define NUM_ISVM 2048
-#define DEBUG_PRINT
+//#define DEBUG_PRINT
 // Each entry in PCHR is modelled by the following struct
 typedef struct pchr_entry{
   uint64_t PC;
