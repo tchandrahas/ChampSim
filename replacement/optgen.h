@@ -15,6 +15,7 @@ using namespace std;
 #include <math.h>
 #include <set>
 #include <vector>
+#include <cstdlib>
 // Do CRC for tag caluclation
 uint64_t CRC( uint64_t _blockAddress){
     static const unsigned long long crcPolynomial = 3988292384ULL;
@@ -39,7 +40,7 @@ struct ADDR_INFO{
         lru = 0;
     }
     // function to update the state of ADDR_INFO on access to given addr
-    void update(unsigned int curr_quanta, uint64_t _pc, bool prediction){
+    void update(unsigned int curr_quanta, uint64_t _pc){
         last_quanta = curr_quanta;
         PC = _pc;
     }
@@ -68,13 +69,14 @@ class sampler_cache{
         addr_history.clear();
     }
     // returns the hash into the sampling cache, which is 
-    uint32_t hash_sample_set(uint64_t addr){
-        return (uint32_t) ((addr >> 6) % SAMPLER_SETS);
+    uint32_t hash_sample_set(uint64_t paddr){
+        return (uint32_t) ((paddr>>6) % SAMPLER_SETS);
     }
     // procedure for replacing an element in a given set of sampling set 
     void replace_addr_history_element(unsigned int sampler_set){
         // initialize the lru_address to 0
         uint64_t lru_addr = 0;
+        uint64_t prev_lru_val = 0;
         // iterate through the given map at poistion using iterators
         for(map<uint64_t, ADDR_INFO>::iterator it=addr_history[sampler_set].begin(); it != addr_history[sampler_set].end(); it++){
             if((it->second).lru == (SAMPLER_WAYS-1)){
@@ -82,8 +84,12 @@ class sampler_cache{
                 lru_addr = it->first;
                 break;
             }
+            else if((it->second).lru >= prev_lru_val){
+                lru_addr = it->first;
+                prev_lru_val = (it->second).lru;
+            }
         }
-        addr_history[sampler_set].erase(lru_addr);
+        addr_history[sampler_set].erase(lru_addr);        
     }
     // procedure for updating addr_history 
     void update_addr_history_lru(unsigned int sampler_set, unsigned int curr_lru){
@@ -117,6 +123,9 @@ class sampler_cache{
         assert(addr_history[sampler_set].size() < SAMPLER_WAYS);
         // Now initialize the block we want, not sure if this works or not, coz there is no mapping entry for sampler_tag
         addr_history[sampler_set][sampler_tag].init(curr_quanta);
+        #ifdef DEBUG_PRINT
+        printf("Added an element in to sampled caches[%d][%d] with curr_quanta: %d\n",sampler_set,sampler_tag,curr_quanta);
+        #endif
         // Update the LRU as well, as this is placed just now
         update_addr_history_lru(sampler_set, SAMPLER_WAYS-1);
         return true;
@@ -125,6 +134,9 @@ class sampler_cache{
     uint64_t get_last_quanta(uint32_t sampler_set, uint64_t sampler_tag){
         assert((addr_history[sampler_set].find(sampler_tag) != addr_history[sampler_set].end()));
         map<uint64_t, ADDR_INFO>::iterator it = addr_history[sampler_set].find(sampler_tag);
+        #ifdef DEBUG_PRINT
+        printf("Retrieved the last quanta value from sampled caches[%d][%d] with last_quanta: %d\n",sampler_set,sampler_tag,it->second.last_quanta);
+        #endif
         return it->second.last_quanta;
     }
     // Function to get the last quanta, returns it in the form of uint64_t 
@@ -132,6 +144,17 @@ class sampler_cache{
         assert((addr_history[sampler_set].find(sampler_tag) != addr_history[sampler_set].end()));
         map<uint64_t, ADDR_INFO>::iterator it = addr_history[sampler_set].find(sampler_tag);
         return it->second.lru;
+    }
+    uint64_t get_PC(uint32_t sampler_set, uint64_t sampler_tag){
+        assert((addr_history[sampler_set].find(sampler_tag) != addr_history[sampler_set].end()));
+        map<uint64_t, ADDR_INFO>::iterator it = addr_history[sampler_set].find(sampler_tag);
+        return it->second.PC;
+    }
+    // function to complete access into SamplerCache
+    bool complete_access(uint64_t update_PC, uint32_t sampler_set, uint64_t sampler_tag, uint64_t mytimer_val){
+        addr_history[sampler_set][sampler_tag].update(mytimer_val, update_PC);
+        addr_history[sampler_set][sampler_tag].lru = 0;
+        return true;
     }
 };
 typedef struct OPTgen_entry{
@@ -230,20 +253,43 @@ class OPTgen{
     bool GetOPTgenDecision(uint64_t PC,uint64_t paddr,uint32_t set){
         //The current timestep 
         uint64_t curr_quanta = perset_mytimer[set] % OPTGEN_VECTOR_SIZE;
+        #ifdef DEBUG_PRINT
+        printf("The current quanta for sampling set:%d was obtained to be %d\n",set,curr_quanta);
+        #endif
         unsigned int curr_timer = perset_mytimer[set];
         uint32_t sampler_set = SamplerCache->hash_sample_set(paddr);
-        uint64_t sampler_tag = CRC(paddr >> 12) % 256;
+        uint64_t sampler_tag = CRC(paddr >> 12) % 256; 
         uint64_t last_quanta = SamplerCache->get_last_quanta(sampler_set,sampler_tag);
+        #ifdef DEBUG_PRINT
+        printf("The last quanta for sampling set:%d was obtained to be %d\n",set,last_quanta);
+        #endif
         if(curr_timer < last_quanta)
             curr_timer = curr_timer + TIMER_SIZE;
         bool wrap =  ((curr_timer -last_quanta) > OPTGEN_VECTOR_SIZE);
         last_quanta = last_quanta % OPTGEN_VECTOR_SIZE;
+        #ifdef DEBUG_PRINT
+        printf("Calling OPTgen for set:%d, with curr_quanta:%d, last_quanta:%d\n",set,curr_quanta,last_quanta);
+        #endif 
         if( !wrap && perset_optgen[set].should_cache(curr_quanta, last_quanta)){
             // Positively train the predictor
+            #ifdef DEBUG_PRINT
+            printf("Printing the liveliness intervals of the sampling set: %d\n",set);
+            for(int i=0;i<OPTGEN_VECTOR_SIZE;i++){
+                printf("%d,",perset_optgen[set].liveness_history[i]);
+            }
+            printf("\n");
+            #endif 
             return true;
         }
         else{
             // Negatively train the predictor
+            #ifdef DEBUG_PRINT
+            printf("Printing the liveliness intervals of the sampling set: %d\n",set);
+            for(int i=0;i<OPTGEN_VECTOR_SIZE;i++){
+                printf("%d,",perset_optgen[set].liveness_history[i]);
+            }
+            printf("\n");
+            #endif 
             return false;
         }
     }
@@ -253,15 +299,31 @@ class OPTgen{
         uint64_t sampler_tag = CRC(paddr >> 12) % 256;
         //The current timestep 
         uint64_t curr_quanta = perset_mytimer[set] % OPTGEN_VECTOR_SIZE;
+        #ifdef DEBUG_PRINT
+        printf("Adding the access with PC: %lx, PADDR: %lx, set: %d\n",PC,paddr,set);
+        #endif 
         assert(SamplerCache->add_element( sampler_set,  sampler_tag, curr_quanta));
         perset_optgen[set].add_access(curr_quanta);
+        #ifdef DEBUG_PRINT
+        printf("Printing the liveliness intervals of the sampling set: %d\n",set);
+        for(int i=0;i<OPTGEN_VECTOR_SIZE;i++){
+            printf("%d,", perset_optgen[set].liveness_history[i]);
+        }
+        printf("\n");
+        #endif 
         SamplerCache->update_addr_history_lru(sampler_set,SAMPLER_WAYS-1);
         return true;
     }
-    // Function that takes care of some book-keeping that neeeds to be done after obtaining the prediction
-    bool CompleteOptgen(uint64_t PC,uint64_t paddr,uint32_t set){
+    uint64_t GetPCOptgen(uint64_t PC,uint64_t paddr,uint32_t set){
         int32_t sampler_set = SamplerCache->hash_sample_set(paddr);
         uint64_t sampler_tag = CRC(paddr >> 12) % 256;
+        return SamplerCache->get_PC(sampler_set,sampler_tag);
+    }
+    // Function that takes care of some book-keeping that neeeds to be done after obtaining the prediction
+    bool CompleteOptgen(uint64_t PC,uint64_t paddr,uint32_t set){
+        uint32_t sampler_set = SamplerCache->hash_sample_set(paddr);
+        uint64_t sampler_tag = CRC(paddr >> 12) % 256;
+        assert(SamplerCache->complete_access(PC,sampler_set,sampler_tag,perset_mytimer[set]));
         //Increment the set timer
         perset_mytimer[set] = (perset_mytimer[set]+1) % TIMER_SIZE;
         //addr_history[sampler_set][sampler_tag].update(perset_mytimer[set], PC, new_prediction);

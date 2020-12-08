@@ -5,10 +5,14 @@ using namespace std;
 // declaring the parameter that we are going to use in this implementation
 // using RRPV of max 7
 #define MAX_RRPV 7
+#define NUM_CPUS 1
 // OPTGEN tracks only 64 sets to produce optimal behavior, this can be changed at a later point
 #define OPT_GEN_SIZE  64
 // declaring the array for rrpv and sample cache here, rrpv for every cache block in the cache
 uint32_t RRPV[LLC_SET][LLC_WAY];
+// Signatures for sampled sets; we only use 64 of these
+// Budget = 64 sets * 16 ways * 12-bit signature per line = 1.5B
+uint64_t signatures[LLC_SET][LLC_WAY];
 // delcaring the array that stores the set numbers for sampling_sets here
 uint32_t sampling_sets[OPT_GEN_SIZE];
 // declaring distinct OPT_GEN_TRACK_S
@@ -27,37 +31,51 @@ void CACHE::llc_initialize_replacement(){
     // Select the random sets in the cache which are tracked by OPTGEN
     // To do this we first have to seed the rand function
     uint32_t total_sets = LLC_SET;
-    bool do_again = false;
+    //bool do_again = false;
     for (int i=0; i<OPT_GEN_SIZE; i++){
-        do{
-            do_again = false;
-            srand(time(NULL));
-            sampling_sets[i] = ((unsigned) (rand()% RAND_MAX)) % total_sets;
+        //do{
+        //    do_again = false;
+        //    srand(time(NULL));
+            sampling_sets[i] = /*((unsigned) (rand()% RAND_MAX)) % total_sets*/(i*32);
+        //    printf("Assigned sampling_sets[%d] = %d", i,sampling_sets[i]);
             // Check if random set allocation matchings until i
-            for (int j=0; j<i; j++){
-                // if found a match we have to attempt the randomization again, set do_again to true
-                if (sampling_sets[i] == sampling_sets[j]){
-                    do_again = true;
-                    break;
-                }
-            }
-        } while (do_again);
+        //    for (int j=0; j<i; j++){
+        //        // if found a match we have to attempt the randomization again, set do_again to true
+        //        if (sampling_sets[i] == sampling_sets[j]){
+        //            do_again = true;
+        //            break;
+        //        }
+        //    }
+        //} while (do_again);
         //#ifdef DEBUG_PRINT
-        // printf("Assigned sampling_sets["%d"] = %d", i,sampling_sets[i]);
+         //printf("Assigned sampling_sets[%d] = %d\n", i,sampling_sets[i]);
         //#endif
     }
     // Lastly instantiate the objects that hold the OPTgen and glider predictor
     GliderPredictor = new glider_predictor;
     OPTEstimate = new OPTgen;
 }
-
+// function that returns true, if the set is sampling set,  false other wise
+bool is_it_sampling_set(uint32_t set){
+    for(int i=0;i<OPT_GEN_SIZE;i++){
+        if(sampling_sets[i]==set){
+            #ifdef DEBUG_PRINT
+            printf("Set: %d, was found to be in sampling set at position: %d \n",set,i);
+            #endif
+            return true;
+        }
+    }
+    // Else return false
+    return false;
+}
 // find replacement victim
 uint32_t CACHE::llc_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type){
     // Find the victim based on rrpv, prefarbly choose the one with greatest rrpv, let it be 0 initially
     uint32_t victim_way = 0;
+    victim_way = 0;
     bool found_victim = false;
     for(int i=0;i<LLC_WAY;i++){
-        if(RRPV[set][victim_way] == MAX_RRPV){
+        if(RRPV[set][i] == MAX_RRPV){
             // if we have reached MAX_RRPV thats the vicitm we need for replacement
             victim_way = i ;
             found_victim = true;
@@ -75,25 +93,24 @@ uint32_t CACHE::llc_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, c
         printf("Picking a random victim from SET: %d, for replacement\n", set);
         #endif 
         // Randomly pick a victim_set
-        victim_way = (rand()%RAND_MAX)%LLC_SET;
+        srand(time(NULL));
+        victim_way = rand()%LLC_WAY;
     }
     #ifdef DEBUG_PRINT
     printf("victim: %d, from SET:%d is choosen for replacement\n",victim_way,set);
     #endif
-    return victim_way;
-}
-// function that returns true, if the set is sampling set,  false other wise
-bool is_it_sampling_set(uint32_t set){
-    for(int i=0;i<OPT_GEN_SIZE;i++){
-        if(sampling_sets[i]==set){
-            #ifdef DEBUG_PRINT
-            printf("Set: %d, was found to be in sampling set at position: %d \n",set,i);
-            #endif
-            return true;
+    // if the set is a sampling set, we have to negatively train the PC associated with the miss
+    if(is_it_sampling_set(set)){
+        if(signatures[set][victim_way]!=0){
+        #ifdef DEBUG_PRINT
+        printf("Evicting a member from a sampled set, so we have to negatively train the PC associated with the %lx\n",signatures[set][victim_way]);
+        #endif
+        GliderPredictor->negative_train_predictor(signatures[set][victim_way]);
         }
+        // this is will be changed anyways, when llc_replacement function is called. but just writing it here
+        signatures[set][victim_way] = 0;
     }
-    // Else return false
-    return false;
+    return victim_way;
 }
 // called on every cache hit and cache fill
 void CACHE::llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit){
@@ -104,18 +121,22 @@ void CACHE::llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
         TYPE_NAME = "RFO";
     else if (type == PREFETCH)
         TYPE_NAME = "PF";
-    else if (type == WRITEBACK)
+    // Ignoring writebacks for now
+    else if (type == WRITEBACK){
         TYPE_NAME = "WB";
+        return;
+    }
+       
     else
         assert(0);
-
+        
     if (hit)
         TYPE_NAME += "_HIT";
     else
         TYPE_NAME += "_MISS";
 
-    if ((type == WRITEBACK) && ip)
-        assert(0);
+    //if ((type == WRITEBACK) && ip)
+    //    assert(0);
 
     // uncomment this line to see the LLC accesses
     // cout << "CPU: " << cpu << "  LLC " << setw(9) << TYPE_NAME << " set: " << setw(5) << set << " way: " << setw(2) << way;
@@ -140,38 +161,15 @@ void CACHE::llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
             if(OPTEstimate->GetOPTgenDecision(ip,full_addr,set)==true){
                 // Train Positively
                 #ifdef DEBUG_PRINT
-                printf("Training the Glider predictor positively for PC: %lx\n",ip);
+                printf("Training the Glider predictor positively for PC: %lx\n",/*OPTEstimate->GetPCOptgen(ip,full_addr,set)*/ip);
                 #endif
-                GliderPredictor->positive_train_predictor(ip);
-                // If this is a cache hit, set the rrpv to zero, do nothing for other cache lines in the same set
-                if(hit){
-                     #ifdef DEBUG_PRINT
-                     printf("Optgen is positive and Cache also hit, so just set the corresponding rrpv to 0\n");;
-                     #endif
-                    RRPV[set][way] = 0;
-                }
-                else{
-                    #ifdef DEBUG_PRINT
-                     printf("Optgen is positive and Cache miss , set the corresponding rrpv to 0 and age the remaining cache lines\n");
-                    #endif
-                    RRPV[set][way] = 0;
-                    for(int j=0;j<LLC_WAY;j++){
-                        if(j!=way){
-                            // age the remaning cache lines in this set
-                            if(RRPV[set][j]<MAX_RRPV){
-                                RRPV[set][j]++;
-                            }
-                        }
-                    }
-                }
+                GliderPredictor->positive_train_predictor(/*OPTEstimate->GetPCOptgen(ip,full_addr,set)*/ip);
             }
             else{
                 #ifdef DEBUG_PRINT
-                printf("Training the Glider predictor negatively for PC: %lx\n",ip);
+                printf("Training the Glider predictor negatively for PC: %lx\n",/*OPTEstimate->GetPCOptgen(ip,full_addr,set)*/ip);
                 #endif
-                GliderPredictor->negative_train_predictor(ip);
-                // Irrespective of being a cache miss or hit, set the correspoding rrpv to maximum value
-                RRPV[set][way] = MAX_RRPV;
+                GliderPredictor->negative_train_predictor(/*OPTEstimate->GetPCOptgen(ip,full_addr,set)*/ip);
             }
         }
         // This means the OPTgen is seeing this particular address for the first time, so we will create on entry 
@@ -180,27 +178,57 @@ void CACHE::llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
             printf("OPTgen has no entry for PC: %lx PADDR: %lx\n",ip,full_addr);
             #endif
             assert(OPTEstimate->AddOptgen(ip,full_addr,set));
-            // just put the rrpv of this as 0
-            RRPV[set][way] = 0;
         }
         assert(OPTEstimate->CompleteOptgen(ip,full_addr,set));
+        // Update the signature for sampling sets only
+        signatures[set][way] = ip;
     }
-    // if its not a sampling set, just get the predition from Glider if this C
-    else{
+    // Now check the Glider prediction irrepective of whether it is in sampling set or not 
+    if(GliderPredictor->get_prediction(ip)){
+        //printf("Glider decision came out positive for PC:%lx\n",ip);
         #ifdef DEBUG_PRINT
-        printf("PC: %lx, PADDR: %lx is not in sampling set\n",ip,full_addr);
+        printf("Glider Predicted cache friendliness for lines brought in by PC: %lx\n",ip);
         #endif
-        if(GliderPredictor->get_prediction(ip)){
+        //RRPV[set][way] = 0;
+        // If this is a cache hit, set the rrpv to zero, do nothing for other cache lines in the same set
+        if(hit){
             #ifdef DEBUG_PRINT
-            printf("Glider Predicted cache friendliness for lines brought in by PC: %lx\n",ip);
+            printf("Glider is positive and Cache also hit, so just set the corresponding rrpv to 0\n");;
             #endif
             RRPV[set][way] = 0;
         }
         else{
             #ifdef DEBUG_PRINT
-            printf("Glider Predicted cache averseness for lines brought in by PC: %lx\n",ip);
+            printf("Glider is positive and Cache miss , set the corresponding rrpv to 0 and age the remaining cache lines\n");
+            #endif
+            RRPV[set][way] = 0;
+            for(int j=0;j<LLC_WAY;j++){
+                if(j!=way){
+                    // age the remaning cache lines in this set
+                    if(RRPV[set][j]<(MAX_RRPV-1)){
+                        RRPV[set][j]++;
+                    }
+                }
+            }
+        }
+    }
+    else{
+        #ifdef DEBUG_PRINT
+        printf("Glider Predicted cache averseness for lines brought in by PC: %lx\n",ip);
+        #endif
+        // Irrespective of being a cache miss or hit, set the correspoding rrpv to maximum value
+        // get the weight count and decide accordingly
+        if(GliderPredictor->get_weight_sum(ip) < 0){
+            #ifdef DEBUG_PRINT
+            printf("RRPV[%d][%d] = MAX_RRPV\n",set,way);
             #endif
             RRPV[set][way] = MAX_RRPV;
+        }
+        else{
+            #ifdef DEBUG_PRINT
+            printf("RRPV[%d][%d] = 2\n",set,way);
+            #endif
+            RRPV[set][way] = 2;
         }
     }
     assert(GliderPredictor->complete_access(ip));

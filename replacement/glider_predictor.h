@@ -7,7 +7,7 @@ using namespace std;
 #include <array>
 #define NUM_PC_PCHR 5
 #define NUM_WEIGHTS 16
-#define NUM_ISVM 32
+#define NUM_ISVM 2048
 #define DEBUG_PRINT
 // Each entry in PCHR is modelled by the following struct
 typedef struct pchr_entry{
@@ -97,7 +97,7 @@ class pchr{
     return return_value;
   }
   uint64_t access_PC_at(int index){
-    if(pc_cache.at(index).valid = true){
+    if(pc_cache.at(index).valid == true){
       return pc_cache.at(index).PC;
     }
     else{
@@ -114,7 +114,7 @@ class pchr{
   }
 };
 typedef struct isvm_entry{
-  map<unsigned int,unsigned int> weights;
+  map<unsigned int, int> weights;
 }isvm_entry;
 class glider_predictor{
   private:
@@ -122,9 +122,9 @@ class glider_predictor{
   map <unsigned int,isvm_entry> isvm_table;
   pchr* PCHR;
   // The paper uses a threshold of 60, this can be changed later based on result, or can be dynamically choosen
-  unsigned int weights_sum_threshold = 60;
+   int weights_sum_threshold = 60;
   // The paper uses a traning threshold, to stop incrementing the weights if their sum is greater than certai value
-  unsigned int weights_training_threshold = 100;
+   int weights_training_threshold = 100;
   // hash function implementation
   unsigned int pchr_entry_hash(uint64_t PCHR_PC){
   // shift right by whatever the instruction word is and use the 4 bits preceeding that as a hash
@@ -165,14 +165,11 @@ class glider_predictor{
     isvm_entry access_PC_isvm = isvm_iterator->second;
     // Now access the 5 PC's in PCHR and generate the hashes
     unsigned int PC_in_PCHR;
-    unsigned int weights_sum = 0;
+    int weights_sum = 0;
     unsigned int PCHR_PC_hash = 0;
     for(int i =0;i<NUM_PC_PCHR;i++){
-      if(PCHR->access_PC_at(i) == 0){
+      if(PCHR->access_PC_at(i) != 0){
         // PCHR is not constructed by this point, probably asking the predictor to insert is the best thing to do ...
-        return true;
-      }
-      else{
         // get the PC from PCHR
         PC_in_PCHR = PCHR->access_PC_at(i);
         // use the PC to generate the hash into the isvm
@@ -181,14 +178,19 @@ class glider_predictor{
         printf("A PC in PCHR resulted in hash of %d\n",PCHR_PC_hash);
         #endif
         // use the hash to get the weight
-        map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
+        map<unsigned int,  int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
         // Make sure the iterator is valid, by checking it against the end of the weight map
         assert(weight_iterator != access_PC_isvm.weights.end());
         // Accumulate the weights in weights_sum
-        weights_sum += weight_iterator->second;
+        weights_sum = (weight_iterator->second)+ weights_sum;
       }
     }
-    #ifdef DEBUG_PRINT 
+    #ifdef DEBUG_PRINT
+    printf("Printing the weights associated with ISVM:%lx, Table:%d\n", access_PC, isvm_table_hash);
+    for(map<unsigned int, int>::iterator weight_iterator=access_PC_isvm.weights.begin();weight_iterator!=access_PC_isvm.weights.end();weight_iterator++){
+      printf("%d,",weight_iterator->second);
+    }
+    printf("\n");
     printf("The sum of weights obtained by the PC's from PCHR hashing into the ISVM is %d\n",weights_sum);
     #endif
     // If the program has reached this point this means that we have already collected all the weights from PC's in PCHR
@@ -213,52 +215,52 @@ class glider_predictor{
     isvm_entry access_PC_isvm = isvm_iterator->second;
     // Now access the 5 PC's in PCHR and generate the hashes
     unsigned int PC_in_PCHR;
-    unsigned int weights_sum = 0;
+    int weights_sum = 0;
     unsigned int PCHR_PC_hash = 0;
-    // Make sure the PCHR is full before proceeding a head, if its half full no problem just return true
-    for(int i =0;i<NUM_PC_PCHR;i++){
-      if(PCHR->access_PC_at(i) == 0){
-        return true;
-      }
-    }
     // Then obtain the hash from each PC in PCHR in to isvm to obtain weights
     for(int i =0;i<NUM_PC_PCHR;i++){
       PC_in_PCHR = PCHR->access_PC_at(i);
-      // use the PC to generate the hash into the isvm
-      PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
-      #ifdef DEBUG_PRINT
-      printf("A PC in PCHR resulted in hash of %d\n",PCHR_PC_hash);
-      #endif
-      // use the hash to get the weight
-      map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
-      // Make sure the iterator is valid, by checking it against the end of the weight map
-      assert(weight_iterator != access_PC_isvm.weights.end());
-      // Accumulate the weights in weights_sum
-      weights_sum += weight_iterator->second;
-      #ifdef DEBUG_PRINT
-      printf("The weight obtained is %d\n", weight_iterator->second);
-      #endif
-    }  
-    // Increment the weights if their threshold doesnt exceed 100
-    if(weights_sum < 100){
-      #ifdef DEBUG_PRINT
-      printf("Incrementing the weights associated with ISVM of %lx\n", access_PC); 
-      #endif
-      for(int i=0;i<NUM_PC_PCHR;i++){
-        // get the PC from PCHR
-        PC_in_PCHR = PCHR->access_PC_at(i);
+      if(PCHR->access_PC_at(i) != 0){
         // use the PC to generate the hash into the isvm
         PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
         #ifdef DEBUG_PRINT
-        printf("A PC in PCHR resulted in hash of %d\n", PCHR_PC_hash);
+        printf("A PC in PCHR resulted in hash of %d\n",PCHR_PC_hash);
         #endif
         // use the hash to get the weight
-        map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
+        map<unsigned int,  int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
         // Make sure the iterator is valid, by checking it against the end of the weight map
         assert(weight_iterator != access_PC_isvm.weights.end());
-        // Increment the each weight by 1
-        weight_iterator->second += 1;
+        // Accumulate the weights in weights_sum
+        weights_sum += weight_iterator->second;
       }
+    }  
+    // Increment the weights if their threshold doesnt exceed 100
+    if(weights_sum < 100){
+      for(int i=0;i<NUM_PC_PCHR;i++){
+        // get the PC from PCHR
+        PC_in_PCHR = PCHR->access_PC_at(i);
+        if(PCHR->access_PC_at(i) != 0){
+          // use the PC to generate the hash into the isvm
+          PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
+          #ifdef DEBUG_PRINT
+          printf("A PC in PCHR resulted in hash of %d\n", PCHR_PC_hash);
+          #endif
+          // use the hash to get the weight
+          map<unsigned int,  int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
+          // Make sure the iterator is valid, by checking it against the end of the weight map
+          assert(weight_iterator != access_PC_isvm.weights.end());
+          // Increment the each weight by 1
+          weight_iterator->second += 1;
+        }
+      }
+      #ifdef DEBUG_PRINT
+      printf("Printing the weights associated with ISVM:%lx, Table:%d\n", access_PC, isvm_table_hash);
+      for(map<unsigned int,  int>::iterator weight_iterator=access_PC_isvm.weights.begin();weight_iterator!=access_PC_isvm.weights.end();weight_iterator++){
+        printf("%d,",weight_iterator->second);
+      }
+      printf("\n");
+      #endif
+      isvm_iterator->second = access_PC_isvm;
     }
     else{
       #ifdef DEBUG_PRINT
@@ -281,32 +283,27 @@ class glider_predictor{
     isvm_entry access_PC_isvm = isvm_iterator->second;
     // Now access the 5 PC's in PCHR and generate the hashes
     unsigned int PC_in_PCHR;
-    unsigned int weights_sum = 0;
+    //unsigned int weights_sum = 0;
     unsigned int PCHR_PC_hash = 0;
-    // Make sure the PCHR is full before proceeding a head, if its half full no problem just return true
-    for(int i =0;i<NUM_PC_PCHR;i++){
-      if(PCHR->access_PC_at(i) == 0){
-        return true;
+    // Then obtain the hash from each PC in PCHR in to isvm to obtain weights
+    for(int i=0;i<NUM_PC_PCHR;i++){
+      // get the PC from PCHR
+      PC_in_PCHR = PCHR->access_PC_at(i);
+      if(PCHR->access_PC_at(i) != 0){
+        // use the PC to generate the hash into the isvm
+        PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
+        #ifdef DEBUG_PRINT
+        printf("A PC in PCHR resulted in hash of %d\n", PCHR_PC_hash);
+        #endif
+        // use the hash to get the weight
+        map<unsigned int,  int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
+        // Make sure the iterator is valid, by checking it against the end of the weight map
+        assert(weight_iterator != access_PC_isvm.weights.end());
+        // Decrement the each weight by 1
+        weight_iterator->second = ((weight_iterator->second-1)>-7)?(weight_iterator->second-1):-7;
       }
     }
-    // Then obtain the hash from each PC in PCHR in to isvm to obtain weights
-    for(int i =0;i<NUM_PC_PCHR;i++){
-      PC_in_PCHR = PCHR->access_PC_at(i);
-      // use the PC to generate the hash into the isvm
-      PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
-      #ifdef DEBUG_PRINT
-      printf("A PC in PCHR resulted in hash of %d\n", PCHR_PC_hash);
-      #endif
-      // use the hash to get the weight
-      map<unsigned int, unsigned int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
-      // Make sure the iterator is valid, by checking it against the end of the weight map
-      assert(weight_iterator != access_PC_isvm.weights.end());
-      // Decrement the weights with a basement of 0
-      weight_iterator->second = (weight_iterator->second > 0)?(weight_iterator->second-1):0;
-      #ifdef DEBUG_PRINT
-      printf("The weight obtained is %d\n", weight_iterator->second);
-      #endif
-    }
+    isvm_iterator->second = access_PC_isvm;
     return true; 
   }
   bool complete_access(uint64_t access_PC){
@@ -326,5 +323,41 @@ class glider_predictor{
       assert(PCHR->insert(access_PC));
     }
     return true;
+  }
+  uint64_t get_weight_sum(uint64_t access_PC){
+    // This function is to get weight totals for obtaining confidence on how to place
+    // first get the hash of the access_PC to index into ISVM table
+    unsigned int isvm_table_hash = ISVM_table_hash(access_PC);
+    #ifdef DEBUG_PRINT
+      printf("The hash for accessing PC into ISVM table is  %d\n", isvm_table_hash);
+    #endif
+    // get the iterator by hashing into the map function
+    map<unsigned int,isvm_entry>::iterator isvm_iterator = isvm_table.find(isvm_table_hash);
+    // This iterator shouldnt be the end iterator, asserting it here
+    assert(isvm_iterator!=isvm_table.end());
+    // Get the isvm from the iterator 
+    isvm_entry access_PC_isvm = isvm_iterator->second;
+    // Now access the 5 PC's in PCHR and generate the hashes
+    unsigned int PC_in_PCHR;
+    int weights_sum = 0;
+    unsigned int PCHR_PC_hash = 0;
+    for(int i =0;i<NUM_PC_PCHR;i++){
+      // get the PC from PCHR
+      PC_in_PCHR = PCHR->access_PC_at(i);
+      if(PCHR->access_PC_at(i) != 0){
+        // use the PC to generate the hash into the isvm
+        PCHR_PC_hash = pchr_entry_hash(PC_in_PCHR);
+        #ifdef DEBUG_PRINT
+        printf("A PC in PCHR resulted in hash of %d\n",PCHR_PC_hash);
+        #endif
+        // use the hash to get the weight
+        map<unsigned int,  int>::iterator  weight_iterator = access_PC_isvm.weights.find(PCHR_PC_hash);
+        // Make sure the iterator is valid, by checking it against the end of the weight map
+        assert(weight_iterator != access_PC_isvm.weights.end());
+        // Accumulate the weights in weights_sum
+        weights_sum = (weight_iterator->second)+ weights_sum;
+      }
+    }
+    return weights_sum;
   }
 };
